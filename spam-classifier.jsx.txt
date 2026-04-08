@@ -1,0 +1,351 @@
+import { useState } from "react";
+
+const SYSTEM_PROMPT = `You are a spam email classifier AI. Analyze the email text provided and classify it.
+
+Respond ONLY with a JSON object in this exact format (no markdown, no extra text):
+{
+  "verdict": "SPAM" or "NOT SPAM",
+  "confidence": number between 0 and 100,
+  "reasons": ["reason 1", "reason 2", "reason 3"],
+  "risk_level": "LOW" or "MEDIUM" or "HIGH",
+  "category": "Phishing" or "Promotional" or "Scam" or "Legitimate" or "Suspicious"
+}
+
+Spam indicators: urgent language, suspicious links, prize claims, unknown senders, grammar errors, requests for personal info, too-good-to-be-true offers.`;
+
+const EXAMPLES = [
+  {
+    label: "Phishing",
+    text: "URGENT: Your bank account has been suspended! Click here immediately to verify your identity and avoid permanent closure: http://secure-bank-verify.xyz/login. Enter your SSN and password to restore access.",
+  },
+  {
+    label: "Legitimate",
+    text: "Hi Sarah, just following up on our meeting from Tuesday. I've attached the project proposal we discussed. Please review and let me know your thoughts by end of week. Thanks, David",
+  },
+  {
+    label: "Scam",
+    text: "CONGRATULATIONS! You've been selected as our LUCKY WINNER 🎉 Claim your $1,000,000 prize NOW! Limited time offer. Send your bank details to claim@prizes-worldwide.net to receive your winnings today!!!",
+  },
+];
+
+export default function App() {
+  const [email, setEmail] = useState("");
+  const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState([]);
+
+  const classify = async () => {
+    if (!email.trim()) return;
+    setLoading(true);
+    setError("");
+    setResult(null);
+
+    try {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.REACT_APP_OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: `Classify this email:\n\n${email}` },
+          ],
+          max_tokens: 300,
+        }),
+      });
+
+      const data = await res.json();
+      const raw = data.choices?.[0]?.message?.content || "";
+      const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim());
+      setResult(parsed);
+      setHistory((prev) => [
+        { email: email.slice(0, 60) + "...", verdict: parsed.verdict, category: parsed.category, confidence: parsed.confidence },
+        ...prev.slice(0, 4),
+      ]);
+    } catch {
+      setError("Classification failed. Check your API key or try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const riskColor = {
+    LOW: "#22c55e",
+    MEDIUM: "#f59e0b",
+    HIGH: "#ef4444",
+  };
+
+  const categoryIcon = {
+    Phishing: "🎣",
+    Promotional: "📢",
+    Scam: "💀",
+    Legitimate: "✅",
+    Suspicious: "⚠️",
+  };
+
+  return (
+    <div style={s.page}>
+      {/* Scanline overlay */}
+      <div style={s.scanlines} />
+
+      {/* Header */}
+      <div style={s.header}>
+        <div style={s.headerIcon}>⚡</div>
+        <div>
+          <h1 style={s.title}>SPAM CLASSIFIER</h1>
+          <p style={s.subtitle}>ML-Powered Email Analysis · Naive Bayes Engine</p>
+        </div>
+        <div style={s.badge}>AI</div>
+      </div>
+
+      <div style={s.layout}>
+        {/* Left Panel */}
+        <div style={s.left}>
+          <div style={s.card}>
+            <div style={s.cardLabel}>📧 EMAIL INPUT</div>
+            <textarea
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Paste email content here to analyze..."
+              style={s.textarea}
+            />
+
+            {/* Quick Examples */}
+            <div style={s.examplesRow}>
+              {EXAMPLES.map((ex) => (
+                <button key={ex.label} onClick={() => setEmail(ex.text)} style={s.exBtn}>
+                  {ex.label}
+                </button>
+              ))}
+            </div>
+
+            <button
+              onClick={classify}
+              disabled={loading || !email.trim()}
+              style={{ ...s.analyzeBtn, opacity: loading || !email.trim() ? 0.5 : 1 }}
+            >
+              {loading ? (
+                <span style={s.analyzing}>
+                  <span style={s.spinner} /> ANALYZING...
+                </span>
+              ) : (
+                "⚡ CLASSIFY EMAIL"
+              )}
+            </button>
+
+            {error && <div style={s.error}>{error}</div>}
+          </div>
+
+          {/* History */}
+          {history.length > 0 && (
+            <div style={{ ...s.card, marginTop: 16 }}>
+              <div style={s.cardLabel}>🕘 RECENT SCANS</div>
+              {history.map((h, i) => (
+                <div key={i} style={s.historyRow}>
+                  <span style={{ ...s.historyVerdict, color: h.verdict === "SPAM" ? "#ef4444" : "#22c55e" }}>
+                    {h.verdict === "SPAM" ? "●" : "○"}
+                  </span>
+                  <span style={s.historyText}>{h.email}</span>
+                  <span style={s.historyConf}>{h.confidence}%</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Right Panel — Results */}
+        <div style={s.right}>
+          {!result && !loading && (
+            <div style={s.emptyState}>
+              <div style={s.emptyIcon}>🔍</div>
+              <p style={s.emptyText}>Paste an email and hit Classify to see the analysis</p>
+              <p style={s.emptyHint}>Try one of the quick examples →</p>
+            </div>
+          )}
+
+          {loading && (
+            <div style={s.emptyState}>
+              <div style={s.loadingRing} />
+              <p style={s.emptyText}>Running classification model...</p>
+              <p style={s.emptyHint}>Feature extraction · Naive Bayes · Scoring</p>
+            </div>
+          )}
+
+          {result && !loading && (
+            <>
+              {/* Verdict Banner */}
+              <div style={{ ...s.verdictBanner, background: result.verdict === "SPAM" ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)", borderColor: result.verdict === "SPAM" ? "#ef4444" : "#22c55e" }}>
+                <span style={{ ...s.verdictText, color: result.verdict === "SPAM" ? "#ef4444" : "#22c55e" }}>
+                  {result.verdict === "SPAM" ? "🚨 SPAM DETECTED" : "✅ LEGITIMATE EMAIL"}
+                </span>
+                <span style={{ ...s.verdictConf, color: result.verdict === "SPAM" ? "#ef4444" : "#22c55e" }}>
+                  {result.confidence}% confidence
+                </span>
+              </div>
+
+              {/* Confidence Bar */}
+              <div style={s.card}>
+                <div style={s.cardLabel}>📊 CONFIDENCE SCORE</div>
+                <div style={s.barTrack}>
+                  <div style={{ ...s.barFill, width: `${result.confidence}%`, background: result.verdict === "SPAM" ? "linear-gradient(90deg, #ef4444, #f97316)" : "linear-gradient(90deg, #22c55e, #10b981)" }} />
+                </div>
+                <div style={s.barLabels}>
+                  <span style={s.barLabel}>0%</span>
+                  <span style={{ ...s.barLabel, color: "#fff", fontWeight: 700 }}>{result.confidence}%</span>
+                  <span style={s.barLabel}>100%</span>
+                </div>
+              </div>
+
+              {/* Meta Tags */}
+              <div style={s.metaRow}>
+                <div style={s.metaCard}>
+                  <div style={s.metaLabel}>CATEGORY</div>
+                  <div style={s.metaValue}>{categoryIcon[result.category]} {result.category}</div>
+                </div>
+                <div style={s.metaCard}>
+                  <div style={s.metaLabel}>RISK LEVEL</div>
+                  <div style={{ ...s.metaValue, color: riskColor[result.risk_level] }}>
+                    ◆ {result.risk_level}
+                  </div>
+                </div>
+              </div>
+
+              {/* Reasons */}
+              <div style={s.card}>
+                <div style={s.cardLabel}>🔎 DETECTION REASONS</div>
+                {result.reasons.map((r, i) => (
+                  <div key={i} style={s.reasonRow}>
+                    <span style={s.reasonNum}>{String(i + 1).padStart(2, "0")}</span>
+                    <span style={s.reasonText}>{r}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;600;700&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        textarea::placeholder { color: rgba(0,255,160,0.25); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes ringPulse { 0%{transform:scale(0.8);opacity:1} 100%{transform:scale(1.6);opacity:0} }
+      `}</style>
+    </div>
+  );
+}
+
+const s = {
+  page: {
+    minHeight: "100vh",
+    background: "#050a05",
+    color: "#00ffa0",
+    fontFamily: "'Share Tech Mono', monospace",
+    padding: "24px",
+    position: "relative",
+    overflow: "hidden",
+  },
+  scanlines: {
+    position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0,
+    background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,255,160,0.015) 2px, rgba(0,255,160,0.015) 4px)",
+  },
+  header: {
+    display: "flex", alignItems: "center", gap: 16, marginBottom: 28,
+    paddingBottom: 20, borderBottom: "1px solid rgba(0,255,160,0.15)",
+    position: "relative", zIndex: 1,
+  },
+  headerIcon: {
+    width: 48, height: 48, borderRadius: 10,
+    background: "rgba(0,255,160,0.1)", border: "1px solid rgba(0,255,160,0.3)",
+    display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+  },
+  title: {
+    fontFamily: "'Rajdhani', sans-serif", fontWeight: 700,
+    fontSize: 26, letterSpacing: "0.15em", color: "#00ffa0",
+  },
+  subtitle: { fontSize: 11, color: "rgba(0,255,160,0.45)", marginTop: 3, letterSpacing: "0.08em" },
+  badge: {
+    marginLeft: "auto", padding: "4px 12px", border: "1px solid #00ffa0",
+    borderRadius: 4, fontSize: 11, fontWeight: 700, letterSpacing: "0.15em",
+    color: "#00ffa0", background: "rgba(0,255,160,0.08)",
+  },
+  layout: { display: "flex", gap: 20, position: "relative", zIndex: 1, flexWrap: "wrap" },
+  left: { flex: "1 1 340px", minWidth: 280 },
+  right: { flex: "1 1 340px", minWidth: 280, display: "flex", flexDirection: "column", gap: 14 },
+  card: {
+    background: "rgba(0,255,160,0.04)", border: "1px solid rgba(0,255,160,0.15)",
+    borderRadius: 8, padding: "16px",
+  },
+  cardLabel: { fontSize: 10, letterSpacing: "0.15em", color: "rgba(0,255,160,0.5)", marginBottom: 12 },
+  textarea: {
+    width: "100%", minHeight: 180, resize: "vertical",
+    background: "rgba(0,255,160,0.03)", border: "1px solid rgba(0,255,160,0.2)",
+    borderRadius: 6, color: "#00ffa0", fontSize: 13, lineHeight: 1.6,
+    padding: "12px", fontFamily: "'Share Tech Mono', monospace",
+    outline: "none",
+  },
+  examplesRow: { display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" },
+  exBtn: {
+    fontSize: 11, padding: "5px 12px", borderRadius: 4, cursor: "pointer",
+    background: "transparent", border: "1px solid rgba(0,255,160,0.25)",
+    color: "rgba(0,255,160,0.6)", fontFamily: "'Share Tech Mono', monospace",
+    letterSpacing: "0.05em", transition: "all 0.2s",
+  },
+  analyzeBtn: {
+    width: "100%", marginTop: 14, padding: "14px",
+    background: "rgba(0,255,160,0.1)", border: "1px solid #00ffa0",
+    color: "#00ffa0", fontSize: 13, fontWeight: 700, letterSpacing: "0.15em",
+    borderRadius: 6, cursor: "pointer", fontFamily: "'Rajdhani', sans-serif",
+    transition: "all 0.2s",
+  },
+  analyzing: { display: "flex", alignItems: "center", justifyContent: "center", gap: 10 },
+  spinner: {
+    display: "inline-block", width: 14, height: 14, borderRadius: "50%",
+    border: "2px solid rgba(0,255,160,0.3)", borderTopColor: "#00ffa0",
+    animation: "spin 0.8s linear infinite",
+  },
+  error: {
+    marginTop: 12, padding: "10px 14px", borderRadius: 6,
+    background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+    color: "#ef4444", fontSize: 12,
+  },
+  historyRow: { display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid rgba(0,255,160,0.07)" },
+  historyVerdict: { fontSize: 16, flexShrink: 0 },
+  historyText: { flex: 1, fontSize: 11, color: "rgba(0,255,160,0.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  historyConf: { fontSize: 11, color: "rgba(0,255,160,0.4)", flexShrink: 0 },
+  emptyState: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 20px", gap: 12 },
+  emptyIcon: { fontSize: 40, opacity: 0.4 },
+  emptyText: { fontSize: 13, color: "rgba(0,255,160,0.4)", textAlign: "center" },
+  emptyHint: { fontSize: 11, color: "rgba(0,255,160,0.25)", textAlign: "center" },
+  loadingRing: {
+    width: 48, height: 48, borderRadius: "50%",
+    border: "2px solid rgba(0,255,160,0.2)", borderTopColor: "#00ffa0",
+    animation: "spin 1s linear infinite",
+  },
+  verdictBanner: {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "16px 20px", borderRadius: 8, border: "1px solid",
+  },
+  verdictText: { fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, fontSize: 18, letterSpacing: "0.1em" },
+  verdictConf: { fontSize: 13, fontWeight: 700 },
+  barTrack: { height: 10, background: "rgba(0,255,160,0.08)", borderRadius: 5, overflow: "hidden", marginBottom: 6 },
+  barFill: { height: "100%", borderRadius: 5, transition: "width 0.8s ease" },
+  barLabels: { display: "flex", justifyContent: "space-between" },
+  barLabel: { fontSize: 10, color: "rgba(0,255,160,0.35)" },
+  metaRow: { display: "flex", gap: 14 },
+  metaCard: {
+    flex: 1, background: "rgba(0,255,160,0.04)", border: "1px solid rgba(0,255,160,0.15)",
+    borderRadius: 8, padding: "14px",
+  },
+  metaLabel: { fontSize: 9, letterSpacing: "0.15em", color: "rgba(0,255,160,0.4)", marginBottom: 8 },
+  metaValue: { fontSize: 15, fontFamily: "'Rajdhani', sans-serif", fontWeight: 700, color: "#00ffa0" },
+  reasonRow: { display: "flex", gap: 12, alignItems: "flex-start", padding: "8px 0", borderBottom: "1px solid rgba(0,255,160,0.07)" },
+  reasonNum: { fontSize: 10, color: "rgba(0,255,160,0.35)", flexShrink: 0, paddingTop: 2 },
+  reasonText: { fontSize: 12, color: "rgba(0,255,160,0.75)", lineHeight: 1.5 },
+};
